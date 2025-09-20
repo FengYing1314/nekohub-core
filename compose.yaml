@@ -1,0 +1,7 @@
+﻿services:
+  nekohub-core:
+    image: nekohub-core
+    build:
+      context: .
+      dockerfile: Dockerfile
+
