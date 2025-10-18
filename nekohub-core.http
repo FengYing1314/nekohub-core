@@ -1,4 +1,10 @@
 @nekohub_core_HostAddress = http://localhost:5249
 
-GET {{nekohub_core_HostAddress}}/api/posts/
+### 获取全部文章（支持 isPublished、keyword、sortBy、sortOrder 查询参数）
+GET {{nekohub_core_HostAddress}}/api/posts
 
+### 查询已发布文章
+GET {{nekohub_core_HostAddress}}/api/posts?isPublished=true
+
+### 搜索关键字并按更新时间降序排列
+GET {{nekohub_core_HostAddress}}/api/posts?keyword=博客&sortBy=updatedAt&sortOrder=desc
