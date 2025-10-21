@@ -1,6 +1,6 @@
 # Blog Core API 文档（便于 LLM 理解）
 
-本项目提供一个基于 ASP.NET Core 的博客后端核心能力，包含文章的增删改查、筛选、分页、统计、发布/取消发布等 API。数据暂存于内存中（模拟数据库）。
+本项目提供一个基于 ASP.NET Core 的博客后端核心能力，包含文章的增删改查、筛选、分页、统计、发布/取消发布等 API。数据使用基于文件的持久化存储（Data/posts.json），应用重启后数据会保留。
 
 基础信息
 - 基础路径：/api/posts
@@ -177,11 +177,11 @@ MAUI 管理端对接建议
   - 删除操作前做二次确认。
 - 将 400 返回的 ValidationProblemDetails 中的 errors 映射到表单校验提示。
 - 时间字段使用 UTC，前端显示时按本地时区格式化。
-- 由于当前后端为内存存储，应用重启后数据会重置；生产请替换为持久化存储（数据库）。
+- 后端已采用基于文件的持久化存储（Data/posts.json），应用重启后数据不会丢失；如需更高并发/复杂查询，可替换为关系型数据库（EF Core/SQLite/PostgreSQL 等）。
 
 兼容性与注意事项
 - JSON 属性名为 camelCase（e.g. createdAt、updatedAt、isPublished）。
 - 服务器对传入的 title、content 做 Trim 后再校验，防止纯空白。
 - PUT 需要路径 id 与 Body 内 id 一致（如 Body 提供 id），否则返回 400。
-- 线程安全：控制器内部使用锁保护内存数据（模拟并发安全）。
+- 线程安全：存储层内部通过锁保证并发修改的正确性。
 - 示例 .http 文件：nekohub-core.http，便于在 IDE 中直接测试。

@@ -8,50 +8,18 @@ namespace nekohub_core.Controllers;
 [Route("api/[controller]")]
 public class PostsController : ControllerBase
 {
-    // 临时使用内存数据，模拟数据库
-    private static readonly object PostsLock = new();
+    private readonly nekohub_core.Data.IPostRepository _repository;
 
-    private static readonly List<Post> Posts = new()
+    public PostsController(nekohub_core.Data.IPostRepository repository)
     {
-        new Post
-        {
-            Id = 1,
-            Title = "第一篇博客",
-            Content = "这是第一篇博客的内容",
-            CreatedAt = DateTime.UtcNow.AddDays(-2),
-            UpdatedAt = DateTime.UtcNow.AddDays(-2),
-            IsPublished = true
-        },
-        new Post
-        {
-            Id = 2,
-            Title = "第二篇博客",
-            Content = "这是第二篇博客的内容",
-            CreatedAt = DateTime.UtcNow.AddDays(-1),
-            UpdatedAt = DateTime.UtcNow.AddDays(-1),
-            IsPublished = false
-        }
-    };
+        _repository = repository;
+    }
 
     // GET api/posts - 获取所有文章
     [HttpGet]
     public ActionResult<IEnumerable<Post>> GetAllPosts([FromQuery] bool? isPublished, [FromQuery] string? keyword, [FromQuery] string? sortBy, [FromQuery] string? sortOrder = "desc")
     {
-        IEnumerable<Post> postsSnapshot;
-        lock (PostsLock)
-        {
-            postsSnapshot = Posts
-                .Select(post => new Post
-                {
-                    Id = post.Id,
-                    Title = post.Title,
-                    Content = post.Content,
-                    CreatedAt = post.CreatedAt,
-                    UpdatedAt = post.UpdatedAt,
-                    IsPublished = post.IsPublished
-                })
-                .ToList();
-        }
+        IEnumerable<Post> postsSnapshot = _repository.GetAllSnapshot();
 
         postsSnapshot = FilterPosts(postsSnapshot, isPublished, keyword);
         postsSnapshot = SortPosts(postsSnapshot, sortBy, sortOrder);
@@ -74,21 +42,7 @@ public class PostsController : ControllerBase
         if (pageSize <= 0) pageSize = 10;
         if (pageSize > 100) pageSize = 100;
 
-        IEnumerable<Post> postsSnapshot;
-        lock (PostsLock)
-        {
-            postsSnapshot = Posts
-                .Select(post => new Post
-                {
-                    Id = post.Id,
-                    Title = post.Title,
-                    Content = post.Content,
-                    CreatedAt = post.CreatedAt,
-                    UpdatedAt = post.UpdatedAt,
-                    IsPublished = post.IsPublished
-                })
-                .ToList();
-        }
+        IEnumerable<Post> postsSnapshot = _repository.GetAllSnapshot();
 
         postsSnapshot = FilterPosts(postsSnapshot, isPublished, keyword);
         postsSnapshot = SortPosts(postsSnapshot, sortBy, sortOrder);
@@ -114,11 +68,7 @@ public class PostsController : ControllerBase
     [HttpGet("{id}")]
     public ActionResult<Post> GetPost(int id)
     {
-        Post? post;
-        lock (PostsLock)
-        {
-            post = Posts.FirstOrDefault(p => p.Id == id);
-        }
+        var post = _repository.GetSnapshot(id);
 
         if (post == null)
         {
@@ -145,16 +95,12 @@ public class PostsController : ControllerBase
             return validationError;
         }
 
-        lock (PostsLock)
-        {
-            post.Id = Posts.Count > 0 ? Posts.Max(p => p.Id) + 1 : 1;
-            post.CreatedAt = DateTime.UtcNow;
-            post.UpdatedAt = post.CreatedAt;
+        post.CreatedAt = DateTime.UtcNow;
+        post.UpdatedAt = post.CreatedAt;
 
-            Posts.Add(post);
-        }
+        var created = _repository.Add(post);
 
-        return CreatedAtAction(nameof(GetPost), new { id = post.Id }, post);
+        return CreatedAtAction(nameof(GetPost), new { id = created.Id }, created);
     }
 
     // PUT api/posts/{id} - 更新文章
@@ -179,21 +125,18 @@ public class PostsController : ControllerBase
             return validationError;
         }
 
-        lock (PostsLock)
+        var updated = _repository.Update(id, p =>
         {
-            var post = Posts.FirstOrDefault(p => p.Id == id);
-            if (post == null)
-            {
-                return NotFound($"文章 ID {id} 未找到");
-            }
-
-            post.Title = updatedPost.Title;
-            post.Content = updatedPost.Content;
-            post.IsPublished = updatedPost.IsPublished;
-            post.UpdatedAt = DateTime.UtcNow;
-
-            return Ok(post);
+            p.Title = updatedPost.Title;
+            p.Content = updatedPost.Content;
+            p.IsPublished = updatedPost.IsPublished;
+            p.UpdatedAt = DateTime.UtcNow;
+        });
+        if (updated is null)
+        {
+            return NotFound($"文章 ID {id} 未找到");
         }
+        return Ok(updated);
     }
 
     // PATCH api/posts/{id} - 部分更新文章
@@ -205,123 +148,116 @@ public class PostsController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
-        lock (PostsLock)
+        string? newTitle = null;
+        string? newContent = null;
+
+        if (changes.Title is not null)
         {
-            var post = Posts.FirstOrDefault(p => p.Id == id);
-            if (post == null)
+            newTitle = changes.Title.Trim();
+            if (string.IsNullOrWhiteSpace(newTitle) || newTitle.Length > 200)
             {
-                return NotFound($"文章 ID {id} 未找到");
-            }
-
-            if (changes.Title is not null)
-            {
-                var title = changes.Title.Trim();
-                if (string.IsNullOrWhiteSpace(title) || title.Length > 200)
+                return ValidationFromDictionary(new Dictionary<string, string[]>
                 {
-                    return ValidationFromDictionary(new Dictionary<string, string[]>
-                    {
-                        [nameof(changes.Title)] = new[] { "文章标题不能为空且长度不能超过 200 个字符" }
-                    });
-                }
-                post.Title = title;
+                    [nameof(changes.Title)] = new[] { "文章标题不能为空且长度不能超过 200 个字符" }
+                });
             }
+        }
 
-            if (changes.Content is not null)
+        if (changes.Content is not null)
+        {
+            newContent = changes.Content.Trim();
+            if (string.IsNullOrWhiteSpace(newContent) || newContent.Length < 10)
             {
-                var content = changes.Content.Trim();
-                if (string.IsNullOrWhiteSpace(content) || content.Length < 10)
+                return ValidationFromDictionary(new Dictionary<string, string[]>
                 {
-                    return ValidationFromDictionary(new Dictionary<string, string[]>
-                    {
-                        [nameof(changes.Content)] = new[] { "文章内容不能为空且至少需要 10 个字符" }
-                    });
-                }
-                post.Content = content;
+                    [nameof(changes.Content)] = new[] { "文章内容不能为空且至少需要 10 个字符" }
+                });
             }
+        }
 
+        var updated = _repository.Update(id, p =>
+        {
+            if (newTitle is not null)
+            {
+                p.Title = newTitle;
+            }
+            if (newContent is not null)
+            {
+                p.Content = newContent;
+            }
             if (changes.IsPublished.HasValue)
             {
-                post.IsPublished = changes.IsPublished.Value;
+                p.IsPublished = changes.IsPublished.Value;
             }
+            p.UpdatedAt = DateTime.UtcNow;
+        });
 
-            post.UpdatedAt = DateTime.UtcNow;
-
-            return Ok(post);
+        if (updated is null)
+        {
+            return NotFound($"文章 ID {id} 未找到");
         }
+
+        return Ok(updated);
     }
 
     // DELETE api/posts/{id} - 删除文章
     [HttpDelete("{id}")]
     public ActionResult DeletePost(int id)
     {
-        lock (PostsLock)
+        var existing = _repository.GetSnapshot(id);
+        if (existing == null)
         {
-            var post = Posts.FirstOrDefault(p => p.Id == id);
-            if (post == null)
-            {
-                return NotFound($"文章 ID {id} 未找到");
-            }
-
-            Posts.Remove(post);
-            return Ok($"文章 '{post.Title}' 已删除");
+            return NotFound($"文章 ID {id} 未找到");
         }
+
+        _repository.Delete(id);
+        return Ok($"文章 '{existing.Title}' 已删除");
     }
 
     // POST api/posts/{id}/publish - 发布文章
     [HttpPost("{id}/publish")]
     public ActionResult<Post> PublishPost(int id)
     {
-        lock (PostsLock)
+        var updated = _repository.Update(id, p =>
         {
-            var post = Posts.FirstOrDefault(p => p.Id == id);
-            if (post == null)
+            if (!p.IsPublished)
             {
-                return NotFound($"文章 ID {id} 未找到");
+                p.IsPublished = true;
+                p.UpdatedAt = DateTime.UtcNow;
             }
-
-            if (!post.IsPublished)
-            {
-                post.IsPublished = true;
-                post.UpdatedAt = DateTime.UtcNow;
-            }
-
-            return Ok(post);
+        });
+        if (updated is null)
+        {
+            return NotFound($"文章 ID {id} 未找到");
         }
+        return Ok(updated);
     }
 
     // POST api/posts/{id}/unpublish - 取消发布文章
     [HttpPost("{id}/unpublish")]
     public ActionResult<Post> UnpublishPost(int id)
     {
-        lock (PostsLock)
+        var updated = _repository.Update(id, p =>
         {
-            var post = Posts.FirstOrDefault(p => p.Id == id);
-            if (post == null)
+            if (p.IsPublished)
             {
-                return NotFound($"文章 ID {id} 未找到");
+                p.IsPublished = false;
+                p.UpdatedAt = DateTime.UtcNow;
             }
-
-            if (post.IsPublished)
-            {
-                post.IsPublished = false;
-                post.UpdatedAt = DateTime.UtcNow;
-            }
-
-            return Ok(post);
+        });
+        if (updated is null)
+        {
+            return NotFound($"文章 ID {id} 未找到");
         }
+        return Ok(updated);
     }
 
     // GET api/posts/stats - 获取文章统计
     [HttpGet("stats")]
     public ActionResult<PostStats> GetStats()
     {
-        lock (PostsLock)
-        {
-            var total = Posts.Count;
-            var published = Posts.Count(p => p.IsPublished);
-            var drafts = total - published;
-            return Ok(new PostStats { Total = total, Published = published, Drafts = drafts });
-        }
+        var (total, published, drafts) = _repository.GetStats();
+        return Ok(new PostStats { Total = total, Published = published, Drafts = drafts });
     }
 
     private static IEnumerable<Post> FilterPosts(IEnumerable<Post> posts, bool? isPublished, string? keyword)

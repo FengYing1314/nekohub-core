@@ -4,3 +4,8 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 /.idea/
+/Data/
+*.db
+*.sqlite
+*.sqlite3
+/Data/*.json
