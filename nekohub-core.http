@@ -8,3 +8,50 @@ GET {{nekohub_core_HostAddress}}/api/posts?isPublished=true
 
 ### 搜索关键字并按更新时间降序排列
 GET {{nekohub_core_HostAddress}}/api/posts?keyword=博客&sortBy=updatedAt&sortOrder=desc
+
+### 分页获取文章
+GET {{nekohub_core_HostAddress}}/api/posts/paged?page=1&pageSize=10&sortBy=createdAt&sortOrder=desc
+
+### 获取文章统计
+GET {{nekohub_core_HostAddress}}/api/posts/stats
+
+### 获取某篇文章
+GET {{nekohub_core_HostAddress}}/api/posts/1
+
+### 创建文章
+POST {{nekohub_core_HostAddress}}/api/posts
+Content-Type: application/json
+
+{
+  "title": "新文章标题",
+  "content": "这是新文章的内容，至少 10 个字符。",
+  "isPublished": false
+}
+
+### 更新文章（全部字段）
+PUT {{nekohub_core_HostAddress}}/api/posts/1
+Content-Type: application/json
+
+{
+  "id": 1,
+  "title": "更新后的标题",
+  "content": "更新后的内容，至少 10 个字符。",
+  "isPublished": true
+}
+
+### 部分更新文章（仅更新提供的字段）
+PATCH {{nekohub_core_HostAddress}}/api/posts/1
+Content-Type: application/json
+
+{
+  "title": "仅更新标题"
+}
+
+### 发布文章
+POST {{nekohub_core_HostAddress}}/api/posts/1/publish
+
+### 取消发布文章
+POST {{nekohub_core_HostAddress}}/api/posts/1/unpublish
+
+### 删除文章
+DELETE {{nekohub_core_HostAddress}}/api/posts/1

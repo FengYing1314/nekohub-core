@@ -59,6 +59,56 @@ public class PostsController : ControllerBase
         return Ok(result);
     }
 
+    // GET api/posts/paged - 分页获取文章
+    [HttpGet("paged")]
+    public ActionResult<PagedResponse<Post>> GetPagedPosts(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10,
+        [FromQuery] bool? isPublished = null,
+        [FromQuery] string? keyword = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortOrder = "desc")
+    {
+        if (page <= 0) page = 1;
+        if (pageSize <= 0) pageSize = 10;
+        if (pageSize > 100) pageSize = 100;
+
+        IEnumerable<Post> postsSnapshot;
+        lock (PostsLock)
+        {
+            postsSnapshot = Posts
+                .Select(post => new Post
+                {
+                    Id = post.Id,
+                    Title = post.Title,
+                    Content = post.Content,
+                    CreatedAt = post.CreatedAt,
+                    UpdatedAt = post.UpdatedAt,
+                    IsPublished = post.IsPublished
+                })
+                .ToList();
+        }
+
+        postsSnapshot = FilterPosts(postsSnapshot, isPublished, keyword);
+        postsSnapshot = SortPosts(postsSnapshot, sortBy, sortOrder);
+
+        var total = postsSnapshot.Count();
+        var items = postsSnapshot
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var response = new PagedResponse<Post>
+        {
+            Items = items,
+            Total = total,
+            Page = page,
+            PageSize = pageSize
+        };
+
+        return Ok(response);
+    }
+
     // GET api/posts/{id} - 根据ID获取文章
     [HttpGet("{id}")]
     public ActionResult<Post> GetPost(int id)
@@ -145,6 +195,60 @@ public class PostsController : ControllerBase
         }
     }
 
+    // PATCH api/posts/{id} - 部分更新文章
+    [HttpPatch("{id}")]
+    public ActionResult<Post> PatchPost(int id, [FromBody] PostPatchRequest changes)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        lock (PostsLock)
+        {
+            var post = Posts.FirstOrDefault(p => p.Id == id);
+            if (post == null)
+            {
+                return NotFound($"文章 ID {id} 未找到");
+            }
+
+            if (changes.Title is not null)
+            {
+                var title = changes.Title.Trim();
+                if (string.IsNullOrWhiteSpace(title) || title.Length > 200)
+                {
+                    return ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]>
+                    {
+                        [nameof(changes.Title)] = new[] { "文章标题不能为空且长度不能超过 200 个字符" }
+                    }));
+                }
+                post.Title = title;
+            }
+
+            if (changes.Content is not null)
+            {
+                var content = changes.Content.Trim();
+                if (string.IsNullOrWhiteSpace(content) || content.Length < 10)
+                {
+                    return ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]>
+                    {
+                        [nameof(changes.Content)] = new[] { "文章内容不能为空且至少需要 10 个字符" }
+                    }));
+                }
+                post.Content = content;
+            }
+
+            if (changes.IsPublished.HasValue)
+            {
+                post.IsPublished = changes.IsPublished.Value;
+            }
+
+            post.UpdatedAt = DateTime.UtcNow;
+
+            return Ok(post);
+        }
+    }
+
     // DELETE api/posts/{id} - 删除文章
     [HttpDelete("{id}")]
     public ActionResult DeletePost(int id)
@@ -159,6 +263,63 @@ public class PostsController : ControllerBase
 
             Posts.Remove(post);
             return Ok($"文章 '{post.Title}' 已删除");
+        }
+    }
+
+    // POST api/posts/{id}/publish - 发布文章
+    [HttpPost("{id}/publish")]
+    public ActionResult<Post> PublishPost(int id)
+    {
+        lock (PostsLock)
+        {
+            var post = Posts.FirstOrDefault(p => p.Id == id);
+            if (post == null)
+            {
+                return NotFound($"文章 ID {id} 未找到");
+            }
+
+            if (!post.IsPublished)
+            {
+                post.IsPublished = true;
+                post.UpdatedAt = DateTime.UtcNow;
+            }
+
+            return Ok(post);
+        }
+    }
+
+    // POST api/posts/{id}/unpublish - 取消发布文章
+    [HttpPost("{id}/unpublish")]
+    public ActionResult<Post> UnpublishPost(int id)
+    {
+        lock (PostsLock)
+        {
+            var post = Posts.FirstOrDefault(p => p.Id == id);
+            if (post == null)
+            {
+                return NotFound($"文章 ID {id} 未找到");
+            }
+
+            if (post.IsPublished)
+            {
+                post.IsPublished = false;
+                post.UpdatedAt = DateTime.UtcNow;
+            }
+
+            return Ok(post);
+        }
+    }
+
+    // GET api/posts/stats - 获取文章统计
+    [HttpGet("stats")]
+    public ActionResult<PostStats> GetStats()
+    {
+        lock (PostsLock)
+        {
+            var total = Posts.Count;
+            var published = Posts.Count(p => p.IsPublished);
+            var drafts = total - published;
+            return Ok(new PostStats { Total = total, Published = published, Drafts = drafts });
         }
     }
 
@@ -221,7 +382,7 @@ public class PostsController : ControllerBase
             errors[nameof(post.Content)] = new[] { "文章内容至少需要 10 个字符" };
         }
 
-        return errors.Count > 0 ? ValidationProblem(errors) : null;
+        return errors.Count > 0 ? ValidationProblem(new ValidationProblemDetails(errors)) : null;
     }
 
     private static void NormalizePost(Post post)
