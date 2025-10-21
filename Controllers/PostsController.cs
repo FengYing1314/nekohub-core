@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using nekohub_core.Models;
 
 namespace nekohub_core.Controllers;
@@ -217,10 +218,10 @@ public class PostsController : ControllerBase
                 var title = changes.Title.Trim();
                 if (string.IsNullOrWhiteSpace(title) || title.Length > 200)
                 {
-                    return ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]>
+                    return ValidationFromDictionary(new Dictionary<string, string[]>
                     {
                         [nameof(changes.Title)] = new[] { "文章标题不能为空且长度不能超过 200 个字符" }
-                    }));
+                    });
                 }
                 post.Title = title;
             }
@@ -230,10 +231,10 @@ public class PostsController : ControllerBase
                 var content = changes.Content.Trim();
                 if (string.IsNullOrWhiteSpace(content) || content.Length < 10)
                 {
-                    return ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]>
+                    return ValidationFromDictionary(new Dictionary<string, string[]>
                     {
                         [nameof(changes.Content)] = new[] { "文章内容不能为空且至少需要 10 个字符" }
-                    }));
+                    });
                 }
                 post.Content = content;
             }
@@ -382,7 +383,20 @@ public class PostsController : ControllerBase
             errors[nameof(post.Content)] = new[] { "文章内容至少需要 10 个字符" };
         }
 
-        return errors.Count > 0 ? ValidationProblem(new ValidationProblemDetails(errors)) : null;
+        return errors.Count > 0 ? ValidationFromDictionary(errors) : null;
+    }
+
+    private ActionResult ValidationFromDictionary(IDictionary<string, string[]> errors)
+    {
+        var modelState = new ModelStateDictionary();
+        foreach (var kv in errors)
+        {
+            foreach (var message in kv.Value)
+            {
+                modelState.AddModelError(kv.Key, message);
+            }
+        }
+        return ValidationProblem(modelState);
     }
 
     private static void NormalizePost(Post post)
